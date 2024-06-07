@@ -4,6 +4,7 @@
 // use panic_halt as _;
 use panic_semihosting as _;
 
+mod control;
 mod dfu;
 mod storage;
 mod usbserial;
@@ -38,6 +39,7 @@ mod app {
 
     use usbd_serial::SerialPort;
 
+    use crate::control::ControlClass;
     use crate::dfu::{DFUBootloaderRuntime, get_serial_str, new_dfu_bootloader};
     use crate::storage::*;
     use crate::usbserial::*;
@@ -61,6 +63,7 @@ mod app {
         usb_dev: UsbDevice<'static, UsbBusType>,
         shell: shell::ShellType,
         shell_status: shell::ShellStatus,
+        ctl: ControlClass,
         dfu: DFUBootloaderRuntime,
 
         led_tx: gpio::PC13<Output<PushPull>>,
@@ -199,6 +202,7 @@ mod app {
            endpoints, but it didn't work well, the library probably needs some debugging */
         let mut serial1 = new_usb_serial! (unsafe { USB_BUS.as_ref().unwrap() });
         let dfu = new_dfu_bootloader(unsafe { USB_BUS.as_ref().unwrap() });
+        let ctl = ControlClass::new(unsafe { USB_BUS.as_ref().unwrap() });
 
         serial1.reset();
 
@@ -236,6 +240,7 @@ mod app {
                 usb_dev,
                 shell,
                 shell_status,
+                ctl,
                 dfu,
                 led_tx,
                 led_rx,
@@ -339,11 +344,12 @@ mod app {
         }
     }
 
-    #[task(binds = OTG_FS, shared = [usb_dev, shell, shell_status, dfu, led_cmd, storage, ctl_pins, power_meter, config], local=[esc_cnt:u8 = 0, to_dut_serial])]
+    #[task(binds = OTG_FS, shared = [usb_dev, shell, shell_status, ctl, dfu, led_cmd, storage, ctl_pins, power_meter, config], local=[esc_cnt:u8 = 0, to_dut_serial])]
     fn usb_task(mut cx: usb_task::Context) {
         let usb_dev         = &mut cx.shared.usb_dev;
         let shell           = &mut cx.shared.shell;
         let shell_status    = &mut cx.shared.shell_status;
+        let ctl             = &mut cx.shared.ctl;
         let dfu             = &mut cx.shared.dfu;
         let led_cmd         = &mut cx.shared.led_cmd;
         let storage         = &mut cx.shared.storage;
@@ -354,13 +360,16 @@ mod app {
         let power_meter     = &mut cx.shared.power_meter;
         let config          = &mut cx.shared.config;
 
-        (usb_dev, dfu, shell, shell_status, led_cmd, storage, ctl_pins, power_meter, config).lock(
-            |usb_dev, dfu, shell, shell_status, led_cmd, storage, ctl_pins, power_meter, config| {
+        (usb_dev, ctl, dfu, shell, shell_status, led_cmd, storage, ctl_pins, power_meter, config).lock(
+            |usb_dev, ctl, dfu, shell, shell_status, led_cmd, storage, ctl_pins, power_meter, config| {
             let serial1 = shell.get_serial_mut();
 
-            if !usb_dev.poll(&mut [serial1, dfu]) {
+            if !usb_dev.poll(&mut [serial1, ctl, dfu]) {
                 return;
             }
+
+            ctl.handle(ctl_pins, config);
+
             let available_to_dut = to_dut_serial.capacity()-to_dut_serial.len();
 
             let mut send_to_dut = |buf: &[u8]|{

@@ -7,6 +7,7 @@ use usb_device::Result;
 
 use crate::config::ConfigArea;
 use crate::ctlpins::CTLPinsTrait;
+use crate::storage::StorageSwitchTrait;
 
 const USB_CLASS_VENDOR_SPECIFIC: u8 = 0xff;
 const USB_SUBCLASS_JUMPSTARTER: u8 = 0x01;
@@ -15,8 +16,9 @@ const USB_PROTOCOL_JUMPSTARTER: u8 = 0x01;
 #[repr(u8)]
 #[derive(TryFromPrimitive)]
 pub enum ControlRequest {
-    Nop = 0,
-    Power = 1,
+    Nop,
+    Power,
+    Storage,
 }
 
 #[repr(u16)]
@@ -30,9 +32,19 @@ pub enum PowerAction {
     Rescue,
 }
 
+#[repr(u16)]
+#[derive(TryFromPrimitive)]
+pub enum StorageAction {
+    Nop,
+    Off,
+    Host,
+    DUT,
+}
+
 pub struct ControlClass {
     iface: InterfaceNumber,
     power: Option<PowerAction>,
+    storage: Option<StorageAction>,
 }
 
 impl ControlClass {
@@ -40,11 +52,18 @@ impl ControlClass {
         Self {
             iface: alloc.interface(),
             power: None,
+            storage: None,
         }
     }
-    pub fn handle<C: CTLPinsTrait>(&mut self, ctlpins: &mut C, config: &ConfigArea) {
+    pub fn handle<C: CTLPinsTrait, S: StorageSwitchTrait>(
+        &mut self,
+        ctlpins: &mut C,
+        storage: &mut S,
+        config: &ConfigArea,
+    ) {
         if let Some(action) = self.power.take() {
             match action {
+                PowerAction::Nop => (),
                 PowerAction::Off => {
                     ctlpins.power_off(&config.get().power_off);
                 }
@@ -60,7 +79,20 @@ impl ControlClass {
                 PowerAction::Rescue => {
                     ctlpins.power_on(&config.get().power_rescue);
                 }
-                _ => (),
+            }
+        }
+        if let Some(action) = self.storage.take() {
+            match action {
+                StorageAction::Nop => (),
+                StorageAction::Off => {
+                    storage.power_off();
+                }
+                StorageAction::Host => {
+                    storage.connect_to_host();
+                }
+                StorageAction::DUT => {
+                    storage.connect_to_dut();
+                }
             }
         }
     }
@@ -127,6 +159,14 @@ impl<B: UsbBus> UsbClass<B> for ControlClass {
             Ok(ControlRequest::Power) => {
                 if let Ok(action) = req.value.try_into() {
                     self.power = Some(action);
+                    xfer.accept().unwrap();
+                } else {
+                    xfer.reject().unwrap();
+                }
+            }
+            Ok(ControlRequest::Storage) => {
+                if let Ok(action) = req.value.try_into() {
+                    self.storage = Some(action);
                     xfer.accept().unwrap();
                 } else {
                     xfer.reject().unwrap();

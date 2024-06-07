@@ -368,7 +368,7 @@ mod app {
                 return;
             }
 
-            ctl.handle(ctl_pins, config);
+            ctl.handle(ctl_pins, storage, config);
 
             let available_to_dut = to_dut_serial.capacity()-to_dut_serial.len();
 

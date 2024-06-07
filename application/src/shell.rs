@@ -1,5 +1,6 @@
 use core::str;
 use embedded_hal::digital::OutputPin;
+use usb_device::endpoint::EndpointDirection;
 use core::fmt::Write;
 
 use arrayvec::ArrayString;
@@ -18,7 +19,7 @@ use ushell::{
 const N_COMMANDS: usize = 14;
 const COMMANDS: [&str; N_COMMANDS] = ["help", "about", "get-config", "version", "meter", "storage", "send",
                                       "set", "set-config", "monitor", "power", "console", "status", "clear"];
-pub type ShellType = UShell<USBSerialType, StaticAutocomplete<N_COMMANDS>, LRUHistory<512, 10>, 512>;
+pub type ShellType<D> = UShell<USBSerialType<D>, StaticAutocomplete<N_COMMANDS>, LRUHistory<512, 10>, 512>;
 pub struct ShellStatus {
     pub monitor_enabled: bool,
     pub meter_enabled: bool,
@@ -53,14 +54,14 @@ pub const ABOUT_CONTINUATION: &str = "\r\n\r\n\
           more information can be found here:\r\n\r\n\
               https://github.com/redhat-et/jumpstarter\r\n\
         ";
-pub fn new(serial:USBSerialType) -> ShellType {
+pub fn new<E: EndpointDirection>(serial:USBSerialType<E>) -> ShellType<E> {
     let autocomplete = StaticAutocomplete(COMMANDS);
     let history = LRUHistory::default();
-    let shell: ShellType = UShell::new(serial, autocomplete, history);
+    let shell: ShellType<E> = UShell::new(serial, autocomplete, history);
     shell
 }
 
-pub fn handle_shell_commands<L, S, P>(shell: &mut ShellType,
+pub fn handle_shell_commands<L, S, P, E>(shell: &mut ShellType<E>,
                                       shell_status: &mut ShellStatus,
                                       led_cmd: &mut L,
                                       storage: &mut S,
@@ -72,6 +73,7 @@ where
     L: OutputPin,
     S: StorageSwitchTrait,
     P: OutputPin,
+    E: EndpointDirection
 {
     loop {
         let mut response = ArrayString::<512>::new();

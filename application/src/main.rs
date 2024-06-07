@@ -61,8 +61,10 @@ mod app {
     struct Shared {
         timer: timer::CounterMs<pac::TIM2>,
         usb_dev: UsbDevice<'static, UsbBusType>,
-        shell: shell::ShellType,
+        shell: shell::ShellType<usb_device::endpoint::In>,
         shell_status: shell::ShellStatus,
+        shell2: shell::ShellType<usb_device::endpoint::Out>,
+        shell2_status: shell::ShellStatus,
         ctl: ControlClass,
         dfu: DFUBootloaderRuntime,
 
@@ -201,10 +203,12 @@ mod app {
         /* I tried creating a 2nd serial port which only works on STM32F412 , 411 has not enough
            endpoints, but it didn't work well, the library probably needs some debugging */
         let mut serial1 = new_usb_serial! (unsafe { USB_BUS.as_ref().unwrap() });
+        let mut serial2 = new_usb_serial! (unsafe { USB_BUS.as_ref().unwrap() });
         let dfu = new_dfu_bootloader(unsafe { USB_BUS.as_ref().unwrap() });
         let ctl = ControlClass::new(unsafe { USB_BUS.as_ref().unwrap() });
 
         serial1.reset();
+        serial2.reset();
 
         let usb_dev = UsbDeviceBuilder::new(
             unsafe { USB_BUS.as_ref().unwrap() },
@@ -220,10 +224,17 @@ mod app {
         .self_powered(false)
         .max_power(250).unwrap()
         .max_packet_size_0(64).unwrap()
+        .composite_with_iads()
         .build();
 
          let shell = shell::new(serial1);
          let shell_status = shell::ShellStatus{
+             monitor_enabled: false,
+             meter_enabled: false,
+             console_mode: false,};
+
+         let shell2 = shell::new(serial2);
+         let shell2_status = shell::ShellStatus{
              monitor_enabled: false,
              meter_enabled: false,
              console_mode: false,};
@@ -240,6 +251,8 @@ mod app {
                 usb_dev,
                 shell,
                 shell_status,
+                shell2,
+                shell2_status,
                 ctl,
                 dfu,
                 led_tx,
@@ -344,11 +357,13 @@ mod app {
         }
     }
 
-    #[task(binds = OTG_FS, shared = [usb_dev, shell, shell_status, ctl, dfu, led_cmd, storage, ctl_pins, power_meter, config], local=[esc_cnt:u8 = 0, to_dut_serial])]
+    #[task(binds = OTG_FS, shared = [usb_dev, shell, shell_status, shell2, shell2_status, ctl, dfu, led_cmd, storage, ctl_pins, power_meter, config], local=[esc_cnt:u8 = 0, to_dut_serial])]
     fn usb_task(mut cx: usb_task::Context) {
         let usb_dev         = &mut cx.shared.usb_dev;
         let shell           = &mut cx.shared.shell;
         let shell_status    = &mut cx.shared.shell_status;
+        let shell2          = &mut cx.shared.shell2;
+        let shell2_status   = &mut cx.shared.shell2_status;
         let ctl             = &mut cx.shared.ctl;
         let dfu             = &mut cx.shared.dfu;
         let led_cmd         = &mut cx.shared.led_cmd;
@@ -360,11 +375,12 @@ mod app {
         let power_meter     = &mut cx.shared.power_meter;
         let config          = &mut cx.shared.config;
 
-        (usb_dev, ctl, dfu, shell, shell_status, led_cmd, storage, ctl_pins, power_meter, config).lock(
-            |usb_dev, ctl, dfu, shell, shell_status, led_cmd, storage, ctl_pins, power_meter, config| {
+        (usb_dev, ctl, dfu, shell, shell_status, shell2, shell2_status, led_cmd, storage, ctl_pins, power_meter, config).lock(
+            |usb_dev, ctl, dfu, shell, shell_status, shell2, shell2_status, led_cmd, storage, ctl_pins, power_meter, config| {
             let serial1 = shell.get_serial_mut();
+            let serial2 = shell2.get_serial_mut();
 
-            if !usb_dev.poll(&mut [serial1, ctl, dfu]) {
+            if !usb_dev.poll(&mut [serial1, serial2, ctl, dfu]) {
                 return;
             }
 
@@ -407,6 +423,8 @@ mod app {
             } else {
                 shell::handle_shell_commands(shell, shell_status, led_cmd, storage, ctl_pins, &mut send_to_dut, power_meter, config);
             }
+
+            shell::handle_shell_commands(shell2, shell2_status, led_cmd, storage, ctl_pins, &mut send_to_dut, power_meter, config);
         });
     }
 

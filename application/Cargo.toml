@@ -13,7 +13,7 @@ stm32f4xx-hal = { version = "0.21.0", features = ["stm32f411", "usb_fs"] }
 stm32f4 = { version = "0.15.1", features = ["stm32f411", "rt"]}
 panic-halt= "0.2.0"
 usb-device = { version="0.3.2", features = ["control-buffer-256"] }
-usbd-serial = "0.2.2"
+usbd-serial = { git = "https://github.com/NickCao/usbd-serial.git" }
 embedded-hal = "1.0.0"
 usbd-dfu-rt = { git = "https://github.com/ianrrees/usbd-dfu-rt.git", branch = "update-usb-device" }
 arrform = "0.1.1"

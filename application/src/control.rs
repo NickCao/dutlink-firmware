@@ -1,3 +1,6 @@
+use core::convert::TryInto;
+
+use num_enum::TryFromPrimitive;
 use usb_device::class_prelude::*;
 use usb_device::control::{Recipient, Request, RequestType};
 use usb_device::Result;
@@ -10,15 +13,26 @@ const USB_SUBCLASS_JUMPSTARTER: u8 = 0x01;
 const USB_PROTOCOL_JUMPSTARTER: u8 = 0x01;
 
 #[repr(u8)]
-#[non_exhaustive]
+#[derive(TryFromPrimitive)]
 pub enum ControlRequest {
     Nop = 0,
     Power = 1,
 }
 
+#[repr(u16)]
+#[derive(TryFromPrimitive)]
+pub enum PowerAction {
+    Nop,
+    Off,
+    On,
+    ForceOff,
+    ForceOn,
+    Rescue,
+}
+
 pub struct ControlClass {
     iface: InterfaceNumber,
-    power: Option<bool>,
+    power: Option<PowerAction>,
 }
 
 impl ControlClass {
@@ -29,11 +43,24 @@ impl ControlClass {
         }
     }
     pub fn handle<C: CTLPinsTrait>(&mut self, ctlpins: &mut C, config: &ConfigArea) {
-        if let Some(power) = self.power.take() {
-            if power {
-                ctlpins.power_on(&config.get().power_on);
-            } else {
-                ctlpins.power_off(&config.get().power_off);
+        if let Some(action) = self.power.take() {
+            match action {
+                PowerAction::Off => {
+                    ctlpins.power_off(&config.get().power_off);
+                }
+                PowerAction::On => {
+                    ctlpins.power_on(&config.get().power_on);
+                }
+                PowerAction::ForceOff => {
+                    ctlpins.power_off(&[]);
+                }
+                PowerAction::ForceOn => {
+                    ctlpins.power_on(&[]);
+                }
+                PowerAction::Rescue => {
+                    ctlpins.power_on(&config.get().power_rescue);
+                }
+                _ => (),
             }
         }
     }
@@ -93,23 +120,18 @@ impl<B: UsbBus> UsbClass<B> for ControlClass {
             _ => return,
         }
 
-        match req.request {
-            r if r == ControlRequest::Nop as u8 => {
+        match req.request.try_into() {
+            Ok(ControlRequest::Nop) => {
                 xfer.accept().unwrap();
             }
-            r if r == ControlRequest::Power as u8 => match req.value {
-                0 => {
-                    self.power = Some(false);
+            Ok(ControlRequest::Power) => {
+                if let Ok(action) = req.value.try_into() {
+                    self.power = Some(action);
                     xfer.accept().unwrap();
-                }
-                1 => {
-                    self.power = Some(true);
-                    xfer.accept().unwrap();
-                }
-                _ => {
+                } else {
                     xfer.reject().unwrap();
                 }
-            },
+            }
             _ => {
                 xfer.reject().unwrap();
             }

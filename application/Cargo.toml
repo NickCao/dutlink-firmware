@@ -24,3 +24,4 @@ heapless = "0.7.16"
 panic-semihosting = "0.6.0"
 arrayvec = { version="0.7.4", default-features=false }
 embedded-storage = "0.3.1"
+num_enum = { version = "0.7.2", default-features = false }

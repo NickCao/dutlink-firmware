@@ -1,7 +1,6 @@
 use core::convert::TryInto;
 use core::fmt::Write;
 
-use heapless::Vec;
 use num_enum::TryFromPrimitive;
 use usb_device::class_prelude::*;
 use usb_device::control::{Recipient, Request, RequestType};

@@ -1,6 +1,5 @@
 use stm32f4xx_hal::otg_fs::UsbBusType;
 use usbd_serial::SerialPort;
-use usb_device::endpoint::EndpointDirection;
 
 pub type USBSerialType<D> = SerialPort<'static, UsbBusType, D, BufferStore, BufferStore>;
 

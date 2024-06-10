@@ -268,21 +268,20 @@ mod app {
         });
     }
 
-    #[task(binds = OTG_FS, shared = [usb_dev, ctl, serial2, dfu, led_cmd, storage, ctl_pins, power_meter], local=[to_dut_serial])]
+    #[task(binds = OTG_FS, shared = [usb_dev, ctl, serial2, dfu, storage, ctl_pins, power_meter], local=[to_dut_serial])]
     fn usb_task(mut cx: usb_task::Context) {
         let usb_dev         = &mut cx.shared.usb_dev;
         let serial2         = &mut cx.shared.serial2;
         let ctl             = &mut cx.shared.ctl;
         let dfu             = &mut cx.shared.dfu;
-        let led_cmd         = &mut cx.shared.led_cmd;
         let storage         = &mut cx.shared.storage;
         let to_dut_serial   = cx.local.to_dut_serial;
 
         let ctl_pins        = &mut cx.shared.ctl_pins;
         let power_meter     = &mut cx.shared.power_meter;
 
-        (usb_dev, ctl, dfu, serial2, led_cmd, storage, ctl_pins, power_meter).lock(
-            |usb_dev, ctl, dfu, serial2, led_cmd, storage, ctl_pins, power_meter| {
+        (usb_dev, ctl, dfu, serial2, storage, ctl_pins, power_meter).lock(
+            |usb_dev, ctl, dfu, serial2, storage, ctl_pins, power_meter| {
 
             ctl.feed(power_meter);
 

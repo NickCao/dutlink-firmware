@@ -6,7 +6,7 @@ use usb_device::class_prelude::*;
 use usb_device::control::{Recipient, Request, RequestType};
 use usb_device::Result;
 
-use crate::config::ConfigArea;
+use crate::config::{ConfigArea, ConfigBlock};
 use crate::ctlpins::{CTLPinsTrait, PinState};
 use crate::powermeter::PowerMeter;
 use crate::storage::StorageSwitchTrait;
@@ -87,49 +87,88 @@ pub enum SetPinState {
 
 pub struct ControlClass {
     iface: InterfaceNumber,
-    config: ConfigArea,
+    config: Option<(ConfigKey, heapless::Vec<u8, 256>)>,
     power: Option<PowerAction>,
     storage: Option<StorageAction>,
     pin: Option<(SetPin, SetPinState)>,
     data: Data,
 }
 
-#[derive(Default)]
 pub struct Data {
     power: f32,
     voltage: f32,
     current: f32,
+    config: ConfigBlock,
 }
 
 impl ControlClass {
-    pub fn new<B: UsbBus>(alloc: &UsbBusAllocator<B>, config: ConfigArea) -> Self {
+    pub fn new<B: UsbBus>(alloc: &UsbBusAllocator<B>) -> Self {
         Self {
             iface: alloc.interface(),
             power: None,
             storage: None,
             pin: None,
-            config,
-            data: Default::default(),
+            config: None,
+            data: Data {
+                power: 0.0,
+                voltage: 0.0,
+                current: 0.0,
+                config: ConfigBlock::new(),
+            },
         }
     }
-    pub fn feed(&mut self, power_meter: &mut dyn PowerMeter) {
+    pub fn feed(&mut self, config: &ConfigArea, power_meter: &mut dyn PowerMeter) {
         self.data.power = power_meter.get_power();
         self.data.voltage = power_meter.get_voltage();
         self.data.current = power_meter.get_current();
+        self.data.config = config.get();
     }
     pub fn handle<C: CTLPinsTrait, S: StorageSwitchTrait>(
         &mut self,
+        config: &mut ConfigArea,
         ctlpins: &mut C,
         storage: &mut S,
     ) {
+        if let Some((key, value)) = self.config.take() {
+            match key {
+                ConfigKey::Name => {
+                    let cfg = config.get().set_name(&value);
+                    config.write_config(&cfg).ok();
+                }
+                ConfigKey::Tags => {
+                    let cfg = config.get().set_tags(&value);
+                    config.write_config(&cfg).ok();
+                }
+                ConfigKey::Json => {
+                    let cfg = config.get().set_json(&value);
+                    config.write_config(&cfg).ok();
+                }
+                ConfigKey::UsbConsole => {
+                    let cfg = config.get().set_usb_console(&value);
+                    config.write_config(&cfg).ok();
+                }
+                ConfigKey::PowerOn => {
+                    let cfg = config.get().set_power_on(&value);
+                    config.write_config(&cfg).ok();
+                }
+                ConfigKey::PowerOff => {
+                    let cfg = config.get().set_power_off(&value);
+                    config.write_config(&cfg).ok();
+                }
+                ConfigKey::PowerRescue => {
+                    let cfg = config.get().set_power_rescue(&value);
+                    config.write_config(&cfg).ok();
+                }
+            }
+        }
         if let Some(action) = self.power.take() {
             match action {
                 PowerAction::Nop => (),
                 PowerAction::Off => {
-                    ctlpins.power_off(&self.config.get().power_off);
+                    ctlpins.power_off(&self.data.config.power_off);
                 }
                 PowerAction::On => {
-                    ctlpins.power_on(&self.config.get().power_on);
+                    ctlpins.power_on(&self.data.config.power_on);
                 }
                 PowerAction::ForceOff => {
                     ctlpins.power_off(&[]);
@@ -138,7 +177,7 @@ impl ControlClass {
                     ctlpins.power_on(&[]);
                 }
                 PowerAction::Rescue => {
-                    ctlpins.power_on(&self.config.get().power_rescue);
+                    ctlpins.power_on(&self.data.config.power_rescue);
                 }
             }
         }
@@ -220,7 +259,7 @@ impl<B: UsbBus> UsbClass<B> for ControlClass {
         match req.request.try_into() {
             Ok(ControlRequest::Config) => {
                 if let Ok(key) = req.value.try_into() {
-                    let cfg = self.config.get();
+                    let cfg = &self.data.config;
                     match key {
                         ConfigKey::Name => {
                             xfer.accept_with(&cfg.name).ok();
@@ -317,37 +356,7 @@ impl<B: UsbBus> UsbClass<B> for ControlClass {
             }
             Ok(ControlRequest::Config) => {
                 if let Ok(key) = req.value.try_into() {
-                    let cfg = self.config.get();
-                    match key {
-                        ConfigKey::Name => {
-                            let cfg = cfg.set_name(xfer.data());
-                            self.config.write_config(&cfg).ok();
-                        }
-                        ConfigKey::Tags => {
-                            let cfg = cfg.set_tags(xfer.data());
-                            self.config.write_config(&cfg).ok();
-                        }
-                        ConfigKey::Json => {
-                            let cfg = cfg.set_json(xfer.data());
-                            self.config.write_config(&cfg).ok();
-                        }
-                        ConfigKey::UsbConsole => {
-                            let cfg = cfg.set_usb_console(xfer.data());
-                            self.config.write_config(&cfg).ok();
-                        }
-                        ConfigKey::PowerOn => {
-                            let cfg = cfg.set_power_on(xfer.data());
-                            self.config.write_config(&cfg).ok();
-                        }
-                        ConfigKey::PowerOff => {
-                            let cfg = cfg.set_power_off(xfer.data());
-                            self.config.write_config(&cfg).ok();
-                        }
-                        ConfigKey::PowerRescue => {
-                            let cfg = cfg.set_power_rescue(xfer.data());
-                            self.config.write_config(&cfg).ok();
-                        }
-                    }
+                    self.config = Some((key, heapless::Vec::from_slice(xfer.data()).unwrap()));
                     xfer.accept().unwrap();
                 } else {
                     xfer.reject().unwrap();

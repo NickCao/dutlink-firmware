@@ -73,6 +73,8 @@ mod app {
         ctl_pins: CTLPinsType,
 
         power_meter: MAVPowerMeter,
+
+        config: ConfigArea,
     }
 
     // Local resources to specific tasks (cannot be shared)
@@ -196,7 +198,7 @@ mod app {
            endpoints, but it didn't work well, the library probably needs some debugging */
         let mut serial2 = new_usb_serial! (unsafe { USB_BUS.as_ref().unwrap() });
         let dfu = new_dfu_bootloader(unsafe { USB_BUS.as_ref().unwrap() });
-        let ctl = ControlClass::new(unsafe { USB_BUS.as_ref().unwrap() }, config);
+        let ctl = ControlClass::new(unsafe { USB_BUS.as_ref().unwrap() });
 
         serial2.reset();
 
@@ -234,6 +236,7 @@ mod app {
                 adc_dma_transfer,
                 ctl_pins,
                 power_meter,
+                config,
             },
             Local {
                 _button,
@@ -268,7 +271,7 @@ mod app {
         });
     }
 
-    #[task(binds = OTG_FS, shared = [usb_dev, ctl, serial2, dfu, storage, ctl_pins, power_meter], local=[to_dut_serial])]
+    #[task(binds = OTG_FS, shared = [usb_dev, ctl, serial2, dfu, storage, ctl_pins, power_meter, config], local=[to_dut_serial])]
     fn usb_task(mut cx: usb_task::Context) {
         let usb_dev         = &mut cx.shared.usb_dev;
         let serial2         = &mut cx.shared.serial2;
@@ -279,17 +282,18 @@ mod app {
 
         let ctl_pins        = &mut cx.shared.ctl_pins;
         let power_meter     = &mut cx.shared.power_meter;
+        let config          = &mut cx.shared.config;
 
-        (usb_dev, ctl, dfu, serial2, storage, ctl_pins, power_meter).lock(
-            |usb_dev, ctl, dfu, serial2, storage, ctl_pins, power_meter| {
+        (usb_dev, ctl, dfu, serial2, storage, ctl_pins, power_meter, config).lock(
+            |usb_dev, ctl, dfu, serial2, storage, ctl_pins, power_meter, config| {
 
-            ctl.feed(power_meter);
+            ctl.feed(config, power_meter);
 
             if !usb_dev.poll(&mut [serial2, ctl, dfu]) {
                 return;
             }
 
-            ctl.handle(ctl_pins, storage);
+            ctl.handle(config, ctl_pins, storage);
 
             let available_to_dut = to_dut_serial.capacity()-to_dut_serial.len();
 

@@ -16,9 +16,9 @@ use ushell::{
     autocomplete::StaticAutocomplete, history::LRUHistory, Input as ushell_input,
     ShellError as ushell_error, UShell,
 };
-const N_COMMANDS: usize = 12;
-const COMMANDS: [&str; N_COMMANDS] = ["help", "about", "get-config", "version", "meter", "storage",
-                                      "set", "set-config", "monitor", "power", "status", "clear"];
+const N_COMMANDS: usize = 10;
+const COMMANDS: [&str; N_COMMANDS] = ["help", "about", "get-config", "version", "meter",
+                                      "set", "set-config", "monitor", "status", "clear"];
 pub type ShellType<D> = UShell<USBSerialType<D>, StaticAutocomplete<N_COMMANDS>, LRUHistory<512, 10>, 512>;
 pub struct ShellStatus {
     pub meter_enabled: bool,
@@ -86,8 +86,6 @@ where
                         "help" =>       { shell.write_str(HELP).ok(); }
                         "clear" =>      { shell.clear().ok(); }
                         "meter" =>      { handle_meter_cmd(&mut response, args, shell_status, power_meter); }
-                        "storage" =>    { handle_storage_cmd(&mut response, args, storage); }
-                        "power" =>      { handle_power_cmd(&mut response, args, ctl_pins, config); }
                         "set" =>        { handle_set_cmd(&mut response, args, ctl_pins); }
                         "set-config" => { handle_set_config_cmd(&mut response, args, config); }
                         "get-config" => { handle_get_config_cmd(&mut response, args, config); }
@@ -107,50 +105,6 @@ where
             Err(ushell_error::WouldBlock) => break,
             _ => {}
         }
-    }
-}
-
-fn handle_power_cmd<B, C>(response:&mut B, args: &str, ctlpins: &mut C, config: &ConfigArea)
-where
-    C: CTLPinsTrait,
-    B: Write
- {
-    if args == "on" {
-        ctlpins.power_on(&config.get().power_on);
-        write!(response, "Device powered on").ok();
-    } else if args == "off" {
-        ctlpins.power_off(&config.get().power_off);
-        write!(response, "Device powered off").ok();
-    } else if args == "force-off" {
-        ctlpins.power_off(&[0u8; 0]);
-        write!(response, "Device forced off").ok();
-    } else if args == "force-on" {
-        ctlpins.power_on(&[0u8; 0]);
-        write!(response, "Device forced on").ok();
-    } else if args == "rescue" {
-        ctlpins.power_on(&config.get().power_rescue);
-        write!(response, "Device powered on to rescue").ok();
-    } else {
-        write!(response, "usage: power on|off|force-on|force-off|rescue").ok();
-    }
-}
-
-fn handle_storage_cmd<B,S>(response:&mut B, args: &str, storage: &mut S)
-where
-    S: StorageSwitchTrait,
-    B: Write
- {
-    if args == "dut" {
-        storage.connect_to_dut();
-        write!(response, "storage connected to device under test").ok();
-    } else if args == "host" {
-        storage.connect_to_host();
-        write!(response, "storage connected to host").ok();
-    } else if args == "off" {
-        storage.power_off();
-        write!(response, "storage disconnected").ok();
-    } else {
-        write!(response, "usage: storage dut|host|off").ok();
     }
 }
 

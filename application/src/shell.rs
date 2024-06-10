@@ -16,14 +16,12 @@ use ushell::{
     autocomplete::StaticAutocomplete, history::LRUHistory, Input as ushell_input,
     ShellError as ushell_error, UShell,
 };
-const N_COMMANDS: usize = 14;
-const COMMANDS: [&str; N_COMMANDS] = ["help", "about", "get-config", "version", "meter", "storage", "send",
-                                      "set", "set-config", "monitor", "power", "console", "status", "clear"];
+const N_COMMANDS: usize = 12;
+const COMMANDS: [&str; N_COMMANDS] = ["help", "about", "get-config", "version", "meter", "storage",
+                                      "set", "set-config", "monitor", "power", "status", "clear"];
 pub type ShellType<D> = UShell<USBSerialType<D>, StaticAutocomplete<N_COMMANDS>, LRUHistory<512, 10>, 512>;
 pub struct ShellStatus {
-    pub monitor_enabled: bool,
     pub meter_enabled: bool,
-    pub console_mode: bool,
 }
 
 pub const SHELL_PROMPT: &str = "#> ";
@@ -34,10 +32,7 @@ pub const HELP: &str = "\r\n\
         clear               : clear the screen\r\n\
         help                : print this help\r\n\
         meter on|read|off   : read power consumption\r\n\
-        monitor on|off      : enable or disable the serial console monitor in this terminal\r\n\
-        console             : enter into serial console mode, exit with CTRL+A 5 times\r\n\
         power on|off        : power on or off the DUT\r\n\
-        send string         : send string to the DUT\r\n\
         set r|a|b|c|d l|h|z : set RESET, CTL_A,B,C or D to low, high or high impedance\r\n\
         set-config name|tags|json|usb_console|poweron|poweroff value : set the config value in flash\r\n\
         get-config          : print all the config parameters\r\n\
@@ -66,7 +61,6 @@ pub fn handle_shell_commands<L, S, P, E>(shell: &mut ShellType<E>,
                                       led_cmd: &mut L,
                                       storage: &mut S,
                                       ctl_pins:&mut CTLPins<P>,
-                                      send_to_dut: &mut dyn FnMut(&[u8]),
                                       power_meter: &mut dyn PowerMeter,
                                       config: &mut ConfigArea)
 where
@@ -91,12 +85,9 @@ where
                                         }
                         "help" =>       { shell.write_str(HELP).ok(); }
                         "clear" =>      { shell.clear().ok(); }
-                        "console" =>    { handle_console_cmd(&mut response, args, shell_status); }
-                        "monitor" =>    { handle_monitor_cmd(&mut response, args, shell_status); }
                         "meter" =>      { handle_meter_cmd(&mut response, args, shell_status, power_meter); }
                         "storage" =>    { handle_storage_cmd(&mut response, args, storage); }
                         "power" =>      { handle_power_cmd(&mut response, args, ctl_pins, config); }
-                        "send" =>       { handle_send_cmd(&mut response, args, send_to_dut); }
                         "set" =>        { handle_set_cmd(&mut response, args, ctl_pins); }
                         "set-config" => { handle_set_config_cmd(&mut response, args, config); }
                         "get-config" => { handle_get_config_cmd(&mut response, args, config); }
@@ -109,10 +100,7 @@ where
                 if response.len() > 2 {
                     write!(response, "{0:}", CR).ok();
                 }
-                // if console mode has been entered we should not print the SHELL PROMPT again
-                if !shell_status.console_mode {
-                    write!(response, "{}", SHELL_PROMPT).ok();
-                }
+                write!(response, "{}", SHELL_PROMPT).ok();
                 shell.write_str(&response).ok();
 
             }
@@ -144,17 +132,6 @@ where
         write!(response, "Device powered on to rescue").ok();
     } else {
         write!(response, "usage: power on|off|force-on|force-off|rescue").ok();
-    }
-}
-
-fn handle_send_cmd<B>(response:&mut B, args: &str, send_to_dut: &mut dyn FnMut(&[u8]))
-where
-    B: Write
- {
-    if args.len() > 0 {
-        send_to_dut(args.as_bytes());
-    } else {
-        write!(response, "usage: send string").ok();
     }
 }
 
@@ -191,33 +168,6 @@ where
         write!(response, "Power monitor disabled").ok();
     } else {
         write!(response, "usage: meter on|read|off").ok();
-    }
-}
-
-fn handle_monitor_cmd<B>(response:&mut B, args: &str, shell_status: &mut ShellStatus)
-where
-    B: Write
- {
-    if args == "on" {
-        shell_status.monitor_enabled = true;
-        write!(response, "Monitor enabled").ok();
-    } else if args == "off" {
-        shell_status.monitor_enabled = false;
-        write!(response, "Monitor disabled").ok();
-    } else {
-        write!(response, "usage: monitor on|off").ok();
-    }
-}
-
-fn handle_console_cmd<B>(response:&mut B, args: &str, shell_status: &mut ShellStatus)
-where
-    B: Write
- {
-    if args =="" {
-        shell_status.console_mode = true;
-        write!(response, "Entering console mode, type CTRL+B 5 times to exit").ok();
-    } else {
-        write!(response, "usage: console").ok();
     }
 }
 
@@ -407,7 +357,7 @@ where
     B: Write
  {
     if args =="" {
-        write!(response, "Monitor: {}, Meter: {}", shell_status.monitor_enabled, shell_status.meter_enabled).ok();
+        write!(response, "Meter: {}", shell_status.meter_enabled).ok();
     } else {
         write!(response, "usage: status").ok();
     }

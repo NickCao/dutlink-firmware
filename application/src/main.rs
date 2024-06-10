@@ -223,11 +223,10 @@ mod app {
         .composite_with_iads()
         .build();
 
-         let shell = shell::new(serial1);
-         let shell_status = shell::ShellStatus{
-             monitor_enabled: false,
+        let shell = shell::new(serial1);
+        let shell_status = shell::ShellStatus{
              meter_enabled: false,
-             console_mode: false,};
+        };
 
         let (to_dut_serial, to_dut_serial_consumer) = ctx.local.q_to_dut.split();
 
@@ -319,7 +318,7 @@ mod app {
                 return
             };
 
-            shell::handle_shell_commands(shell, shell_status, led_cmd, storage, ctl_pins, &mut send_to_dut, power_meter, config);
+            shell::handle_shell_commands(shell, shell_status, led_cmd, storage, ctl_pins, power_meter, config);
 
             let mut buf = [0u8; DUT_BUF_SIZE];
             match serial2.read(&mut buf[..available_to_dut]) {

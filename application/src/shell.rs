@@ -10,41 +10,24 @@ use crate::ctlpins::{PinState, CTLPinsTrait};
 use crate::powermeter::PowerMeter;
 use crate::{usbserial::*, ctlpins::CTLPins};
 use crate::storage::StorageSwitchTrait;
-use crate::version;
 
 use ushell::{
     autocomplete::StaticAutocomplete, history::LRUHistory, Input as ushell_input,
     ShellError as ushell_error, UShell,
 };
-const N_COMMANDS: usize = 8;
-const COMMANDS: [&str; N_COMMANDS] = ["help", "about", "get-config", "version",
-                                      "set", "set-config", "monitor", "clear"];
+const N_COMMANDS: usize = 4;
+const COMMANDS: [&str; N_COMMANDS] = ["get-config", "set", "set-config", "monitor"];
 pub type ShellType<D> = UShell<USBSerialType<D>, StaticAutocomplete<N_COMMANDS>, LRUHistory<512, 10>, 512>;
 
 pub const SHELL_PROMPT: &str = "#> ";
 pub const CR: &str = "\r\n";
 
 pub const HELP: &str = "\r\n\
-        about               : print information about this device\r\n\
-        clear               : clear the screen\r\n\
-        help                : print this help\r\n\
-        meter on|read|off   : read power consumption\r\n\
-        power on|off        : power on or off the DUT\r\n\
         set r|a|b|c|d l|h|z : set RESET, CTL_A,B,C or D to low, high or high impedance\r\n\
         set-config name|tags|json|usb_console|poweron|poweroff value : set the config value in flash\r\n\
         get-config          : print all the config parameters\r\n\
-        storage dut|host|off: connect storage to DUT, host or disconnect\r\n\
-        version             : print version information\r\n\
         ";
 
-pub const ABOUT: &str = "\r\n\
-        Jumpstarter test-harness version: ";
-pub const ABOUT_CONTINUATION: &str = "\r\n\r\n\
-          This is a device for testing images and power consumption of Edge devices in CI or\r\n\
-          development, made as Open Hardware, designed to be used with the jumpstarter project.\r\n\
-          more information can be found here:\r\n\r\n\
-              https://github.com/redhat-et/jumpstarter\r\n\
-        ";
 pub fn new<E: EndpointDirection>(serial:USBSerialType<E>) -> ShellType<E> {
     let autocomplete = StaticAutocomplete(COMMANDS);
     let history = LRUHistory::default();
@@ -74,17 +57,9 @@ where
             Ok(Some(ushell_input::Command((cmd, args)))) => {
                 led_cmd.set_low().ok();
                 match cmd {
-                        "about" =>      { write!(response, "{}", ABOUT).ok();
-                                          version::write_version(&mut response);
-                                          write!(response, "{}", ABOUT_CONTINUATION).ok();
-                                        }
-                        "help" =>       { shell.write_str(HELP).ok(); }
-                        "clear" =>      { shell.clear().ok(); }
                         "set" =>        { handle_set_cmd(&mut response, args, ctl_pins); }
                         "set-config" => { handle_set_config_cmd(&mut response, args, config); }
                         "get-config" => { handle_get_config_cmd(&mut response, args, config); }
-                        "version" =>    { version::write_version(&mut response); }
-                        "" =>           {}
                         _ =>            { write!(shell, "{0:}unsupported command{0:}", CR).ok(); }
                 }
                 // If response was added complete with an additional CR

@@ -173,6 +173,7 @@ impl<B: UsbBus> UsbClass<B> for ControlClass {
                 }
             }
             // TODO: read power meter
+            // TODO: read version
             _ => {
                 xfer.reject().unwrap();
             }

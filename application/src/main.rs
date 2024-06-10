@@ -61,7 +61,6 @@ mod app {
         timer: timer::CounterMs<pac::TIM2>,
         usb_dev: UsbDevice<'static, UsbBusType>,
         shell: shell::ShellType<usb_device::endpoint::In>,
-        shell_status: shell::ShellStatus,
         serial2: USBSerialType<usb_device::endpoint::Out>,
         ctl: ControlClass,
         dfu: DFUBootloaderRuntime,
@@ -224,9 +223,6 @@ mod app {
         .build();
 
         let shell = shell::new(serial1);
-        let shell_status = shell::ShellStatus{
-             meter_enabled: false,
-        };
 
         let (to_dut_serial, to_dut_serial_consumer) = ctx.local.q_to_dut.split();
 
@@ -237,7 +233,6 @@ mod app {
                 timer,
                 usb_dev,
                 shell,
-                shell_status,
                 serial2,
                 ctl,
                 dfu,
@@ -283,11 +278,10 @@ mod app {
         });
     }
 
-    #[task(binds = OTG_FS, shared = [usb_dev, shell, shell_status, ctl, serial2, dfu, led_cmd, storage, ctl_pins, power_meter, config], local=[to_dut_serial])]
+    #[task(binds = OTG_FS, shared = [usb_dev, shell, ctl, serial2, dfu, led_cmd, storage, ctl_pins, power_meter, config], local=[to_dut_serial])]
     fn usb_task(mut cx: usb_task::Context) {
         let usb_dev         = &mut cx.shared.usb_dev;
         let shell           = &mut cx.shared.shell;
-        let shell_status    = &mut cx.shared.shell_status;
         let serial2         = &mut cx.shared.serial2;
         let ctl             = &mut cx.shared.ctl;
         let dfu             = &mut cx.shared.dfu;
@@ -299,8 +293,8 @@ mod app {
         let power_meter     = &mut cx.shared.power_meter;
         let config          = &mut cx.shared.config;
 
-        (usb_dev, ctl, dfu, shell, shell_status, serial2, led_cmd, storage, ctl_pins, power_meter, config).lock(
-            |usb_dev, ctl, dfu, shell, shell_status, serial2, led_cmd, storage, ctl_pins, power_meter, config| {
+        (usb_dev, ctl, dfu, shell, serial2, led_cmd, storage, ctl_pins, power_meter, config).lock(
+            |usb_dev, ctl, dfu, shell, serial2, led_cmd, storage, ctl_pins, power_meter, config| {
             let serial1 = shell.get_serial_mut();
 
             if !usb_dev.poll(&mut [serial1, serial2, ctl, dfu]) {
@@ -318,7 +312,7 @@ mod app {
                 return
             };
 
-            shell::handle_shell_commands(shell, shell_status, led_cmd, storage, ctl_pins, power_meter, config);
+            shell::handle_shell_commands(shell, led_cmd, storage, ctl_pins, power_meter, config);
 
             let mut buf = [0u8; DUT_BUF_SIZE];
             match serial2.read(&mut buf[..available_to_dut]) {

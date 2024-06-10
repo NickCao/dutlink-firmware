@@ -16,13 +16,10 @@ use ushell::{
     autocomplete::StaticAutocomplete, history::LRUHistory, Input as ushell_input,
     ShellError as ushell_error, UShell,
 };
-const N_COMMANDS: usize = 10;
-const COMMANDS: [&str; N_COMMANDS] = ["help", "about", "get-config", "version", "meter",
-                                      "set", "set-config", "monitor", "status", "clear"];
+const N_COMMANDS: usize = 8;
+const COMMANDS: [&str; N_COMMANDS] = ["help", "about", "get-config", "version",
+                                      "set", "set-config", "monitor", "clear"];
 pub type ShellType<D> = UShell<USBSerialType<D>, StaticAutocomplete<N_COMMANDS>, LRUHistory<512, 10>, 512>;
-pub struct ShellStatus {
-    pub meter_enabled: bool,
-}
 
 pub const SHELL_PROMPT: &str = "#> ";
 pub const CR: &str = "\r\n";
@@ -36,7 +33,6 @@ pub const HELP: &str = "\r\n\
         set r|a|b|c|d l|h|z : set RESET, CTL_A,B,C or D to low, high or high impedance\r\n\
         set-config name|tags|json|usb_console|poweron|poweroff value : set the config value in flash\r\n\
         get-config          : print all the config parameters\r\n\
-        status              : print status of the device\r\n\
         storage dut|host|off: connect storage to DUT, host or disconnect\r\n\
         version             : print version information\r\n\
         ";
@@ -57,7 +53,6 @@ pub fn new<E: EndpointDirection>(serial:USBSerialType<E>) -> ShellType<E> {
 }
 
 pub fn handle_shell_commands<L, S, P, E>(shell: &mut ShellType<E>,
-                                      shell_status: &mut ShellStatus,
                                       led_cmd: &mut L,
                                       storage: &mut S,
                                       ctl_pins:&mut CTLPins<P>,
@@ -85,11 +80,9 @@ where
                                         }
                         "help" =>       { shell.write_str(HELP).ok(); }
                         "clear" =>      { shell.clear().ok(); }
-                        "meter" =>      { handle_meter_cmd(&mut response, args, shell_status, power_meter); }
                         "set" =>        { handle_set_cmd(&mut response, args, ctl_pins); }
                         "set-config" => { handle_set_config_cmd(&mut response, args, config); }
                         "get-config" => { handle_get_config_cmd(&mut response, args, config); }
-                        "status" =>     { handle_status_cmd(&mut response, args, shell_status); }
                         "version" =>    { version::write_version(&mut response); }
                         "" =>           {}
                         _ =>            { write!(shell, "{0:}unsupported command{0:}", CR).ok(); }
@@ -105,23 +98,6 @@ where
             Err(ushell_error::WouldBlock) => break,
             _ => {}
         }
-    }
-}
-
-fn handle_meter_cmd<B>(response:&mut B, args: &str, shell_status: &mut ShellStatus, power_meter: &mut dyn PowerMeter)
-where
-    B: Write
- {
-    if args == "on" {
-        shell_status.meter_enabled = true;
-        write!(response, "Power meter monitoring enabled").ok();
-    } else if args == "read" {
-        power_meter.write(response);
-    } else if args == "off" {
-        shell_status.meter_enabled = false;
-        write!(response, "Power monitor disabled").ok();
-    } else {
-        write!(response, "usage: meter on|read|off").ok();
     }
 }
 
@@ -304,15 +280,4 @@ where
     B: Write
  {
     write!(response, "usage: set r|a|b|c|d l|h|z").ok();
-}
-
-fn handle_status_cmd<B>(response:&mut B, args: &str, shell_status: &mut ShellStatus)
-where
-    B: Write
- {
-    if args =="" {
-        write!(response, "Meter: {}", shell_status.meter_enabled).ok();
-    } else {
-        write!(response, "usage: status").ok();
-    }
 }

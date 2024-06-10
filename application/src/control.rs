@@ -8,7 +8,7 @@ use usb_device::control::{Recipient, Request, RequestType};
 use usb_device::Result;
 
 use crate::config::ConfigArea;
-use crate::ctlpins::CTLPinsTrait;
+use crate::ctlpins::{CTLPinsTrait, PinState};
 use crate::powermeter::PowerMeter;
 use crate::storage::StorageSwitchTrait;
 
@@ -24,6 +24,7 @@ pub enum ControlRequest {
     Storage,
     Config,
     Read,
+    Set,
 }
 
 #[repr(u16)]
@@ -67,11 +68,30 @@ pub enum ReadKey {
     Current,
 }
 
+#[repr(u16)]
+#[derive(TryFromPrimitive)]
+pub enum SetPin {
+    Reset,
+    A,
+    B,
+    C,
+    D,
+}
+
+#[repr(u8)]
+#[derive(TryFromPrimitive)]
+pub enum SetPinState {
+    Low,
+    High,
+    Floating,
+}
+
 pub struct ControlClass {
     iface: InterfaceNumber,
     config: ConfigArea,
     power: Option<PowerAction>,
     storage: Option<StorageAction>,
+    pin: Option<(SetPin, SetPinState)>,
     data: Data,
 }
 
@@ -88,6 +108,7 @@ impl ControlClass {
             iface: alloc.interface(),
             power: None,
             storage: None,
+            pin: None,
             config,
             data: Default::default(),
         }
@@ -133,6 +154,30 @@ impl ControlClass {
                 }
                 StorageAction::DUT => {
                     storage.connect_to_dut();
+                }
+            }
+        }
+        if let Some((pin, state)) = self.pin.take() {
+            let state = match state {
+                SetPinState::Low => PinState::Low,
+                SetPinState::High => PinState::High,
+                SetPinState::Floating => PinState::Floating,
+            };
+            match pin {
+                SetPin::Reset => {
+                    ctlpins.set_reset(state);
+                }
+                SetPin::A => {
+                    ctlpins.set_ctl_a(state);
+                }
+                SetPin::B => {
+                    ctlpins.set_ctl_b(state);
+                }
+                SetPin::C => {
+                    ctlpins.set_ctl_c(state);
+                }
+                SetPin::D => {
+                    ctlpins.set_ctl_d(state);
                 }
             }
         }
@@ -305,6 +350,23 @@ impl<B: UsbBus> UsbClass<B> for ControlClass {
                         }
                     }
                     xfer.accept().unwrap();
+                } else {
+                    xfer.reject().unwrap();
+                }
+            }
+            Ok(ControlRequest::Set) => {
+                if let Ok(key) = req.value.try_into() {
+                    if let Some(Ok(state)) = xfer
+                        .data()
+                        .first()
+                        .cloned()
+                        .map(TryInto::<SetPinState>::try_into)
+                    {
+                        self.pin = Some((key, state));
+                        xfer.accept().unwrap();
+                    } else {
+                        xfer.reject().unwrap();
+                    }
                 } else {
                     xfer.reject().unwrap();
                 }

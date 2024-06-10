@@ -1,5 +1,7 @@
 use core::convert::TryInto;
+use core::fmt::Write;
 
+use heapless::Vec;
 use num_enum::TryFromPrimitive;
 use usb_device::class_prelude::*;
 use usb_device::control::{Recipient, Request, RequestType};
@@ -7,6 +9,7 @@ use usb_device::Result;
 
 use crate::config::ConfigArea;
 use crate::ctlpins::CTLPinsTrait;
+use crate::powermeter::PowerMeter;
 use crate::storage::StorageSwitchTrait;
 
 const USB_CLASS_VENDOR_SPECIFIC: u8 = 0xff;
@@ -20,6 +23,7 @@ pub enum ControlRequest {
     Power,
     Storage,
     Config,
+    Read,
 }
 
 #[repr(u16)]
@@ -54,11 +58,28 @@ pub enum ConfigKey {
     PowerRescue,
 }
 
+#[repr(u16)]
+#[derive(TryFromPrimitive)]
+pub enum ReadKey {
+    Version,
+    Power,
+    Voltage,
+    Current,
+}
+
 pub struct ControlClass {
     iface: InterfaceNumber,
     config: ConfigArea,
     power: Option<PowerAction>,
     storage: Option<StorageAction>,
+    data: Data,
+}
+
+#[derive(Default)]
+pub struct Data {
+    power: f32,
+    voltage: f32,
+    current: f32,
 }
 
 impl ControlClass {
@@ -68,7 +89,13 @@ impl ControlClass {
             power: None,
             storage: None,
             config,
+            data: Default::default(),
         }
+    }
+    pub fn feed(&mut self, power_meter: &mut dyn PowerMeter) {
+        self.data.power = power_meter.get_power();
+        self.data.voltage = power_meter.get_voltage();
+        self.data.current = power_meter.get_current();
     }
     pub fn handle<C: CTLPinsTrait, S: StorageSwitchTrait>(
         &mut self,
@@ -177,6 +204,34 @@ impl<B: UsbBus> UsbClass<B> for ControlClass {
                     xfer.reject().unwrap();
                 }
             }
+            Ok(ControlRequest::Read) => {
+                if let Ok(key) = req.value.try_into() {
+                    match key {
+                        ReadKey::Version => {
+                            let mut buf = heapless::Vec::<u8, 128>::new();
+                            crate::version::write_version(&mut buf);
+                            xfer.accept_with(&buf).ok();
+                        }
+                        ReadKey::Power => {
+                            let mut buf = heapless::Vec::<u8, 128>::new();
+                            write!(buf, "{:.2}W", self.data.power).ok();
+                            xfer.accept_with(&buf).ok();
+                        }
+                        ReadKey::Voltage => {
+                            let mut buf = heapless::Vec::<u8, 128>::new();
+                            write!(buf, "{:.2}V", self.data.voltage).ok();
+                            xfer.accept_with(&buf).ok();
+                        }
+                        ReadKey::Current => {
+                            let mut buf = heapless::Vec::<u8, 128>::new();
+                            write!(buf, "{:.2}A", self.data.current).ok();
+                            xfer.accept_with(&buf).ok();
+                        }
+                    }
+                } else {
+                    xfer.reject().unwrap();
+                }
+            }
             _ => {
                 xfer.reject().unwrap();
             }
@@ -216,8 +271,6 @@ impl<B: UsbBus> UsbClass<B> for ControlClass {
                     xfer.reject().unwrap();
                 }
             }
-            // TODO: read power meter
-            // TODO: read version
             Ok(ControlRequest::Config) => {
                 if let Ok(key) = req.value.try_into() {
                     let cfg = self.config.get();

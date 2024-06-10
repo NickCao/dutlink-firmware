@@ -8,7 +8,6 @@ mod control;
 mod dfu;
 mod storage;
 mod usbserial;
-mod shell;
 mod ctlpins;
 mod powermeter;
 mod filter;
@@ -42,7 +41,6 @@ mod app {
     use crate::dfu::{DFUBootloaderRuntime, get_serial_str, new_dfu_bootloader};
     use crate::storage::*;
     use crate::usbserial::*;
-    use crate::shell;
     use crate::ctlpins;
     use crate::powermeter::*;
     use crate::version;
@@ -60,7 +58,6 @@ mod app {
     struct Shared {
         timer: timer::CounterMs<pac::TIM2>,
         usb_dev: UsbDevice<'static, UsbBusType>,
-        shell: shell::ShellType<usb_device::endpoint::In>,
         serial2: USBSerialType<usb_device::endpoint::Out>,
         ctl: ControlClass,
         dfu: DFUBootloaderRuntime,
@@ -197,12 +194,10 @@ mod app {
         let config = ConfigArea::new(stm32f4xx_hal::flash::LockedFlash::new(dp.FLASH));
         /* I tried creating a 2nd serial port which only works on STM32F412 , 411 has not enough
            endpoints, but it didn't work well, the library probably needs some debugging */
-        let mut serial1 = new_usb_serial! (unsafe { USB_BUS.as_ref().unwrap() });
         let mut serial2 = new_usb_serial! (unsafe { USB_BUS.as_ref().unwrap() });
         let dfu = new_dfu_bootloader(unsafe { USB_BUS.as_ref().unwrap() });
         let ctl = ControlClass::new(unsafe { USB_BUS.as_ref().unwrap() }, config);
 
-        serial1.reset();
         serial2.reset();
 
         let usb_dev = UsbDeviceBuilder::new(
@@ -222,8 +217,6 @@ mod app {
         .composite_with_iads()
         .build();
 
-        let shell = shell::new(serial1);
-
         let (to_dut_serial, to_dut_serial_consumer) = ctx.local.q_to_dut.split();
 
 
@@ -231,7 +224,6 @@ mod app {
             Shared {
                 timer,
                 usb_dev,
-                shell,
                 serial2,
                 ctl,
                 dfu,
@@ -276,10 +268,9 @@ mod app {
         });
     }
 
-    #[task(binds = OTG_FS, shared = [usb_dev, shell, ctl, serial2, dfu, led_cmd, storage, ctl_pins, power_meter], local=[to_dut_serial])]
+    #[task(binds = OTG_FS, shared = [usb_dev, ctl, serial2, dfu, led_cmd, storage, ctl_pins, power_meter], local=[to_dut_serial])]
     fn usb_task(mut cx: usb_task::Context) {
         let usb_dev         = &mut cx.shared.usb_dev;
-        let shell           = &mut cx.shared.shell;
         let serial2         = &mut cx.shared.serial2;
         let ctl             = &mut cx.shared.ctl;
         let dfu             = &mut cx.shared.dfu;
@@ -290,11 +281,12 @@ mod app {
         let ctl_pins        = &mut cx.shared.ctl_pins;
         let power_meter     = &mut cx.shared.power_meter;
 
-        (usb_dev, ctl, dfu, shell, serial2, led_cmd, storage, ctl_pins, power_meter).lock(
-            |usb_dev, ctl, dfu, shell, serial2, led_cmd, storage, ctl_pins, power_meter| {
-            let serial1 = shell.get_serial_mut();
+        (usb_dev, ctl, dfu, serial2, led_cmd, storage, ctl_pins, power_meter).lock(
+            |usb_dev, ctl, dfu, serial2, led_cmd, storage, ctl_pins, power_meter| {
 
-            if !usb_dev.poll(&mut [serial1, serial2, ctl, dfu]) {
+            ctl.feed(power_meter);
+
+            if !usb_dev.poll(&mut [serial2, ctl, dfu]) {
                 return;
             }
 
@@ -308,8 +300,6 @@ mod app {
                 }
                 return
             };
-
-            shell::handle_shell_commands(shell, led_cmd, storage, ctl_pins, power_meter);
 
             let mut buf = [0u8; DUT_BUF_SIZE];
             match serial2.read(&mut buf[..available_to_dut]) {

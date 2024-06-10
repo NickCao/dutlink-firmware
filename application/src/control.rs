@@ -19,7 +19,7 @@ pub enum ControlRequest {
     Nop,
     Power,
     Storage,
-    SetConfig,
+    Config,
 }
 
 #[repr(u16)]
@@ -146,7 +146,37 @@ impl<B: UsbBus> UsbClass<B> for ControlClass {
             _ => return,
         }
 
-        match req.request {
+        match req.request.try_into() {
+            Ok(ControlRequest::Config) => {
+                if let Ok(key) = req.value.try_into() {
+                    let cfg = self.config.get();
+                    match key {
+                        ConfigKey::Name => {
+                            xfer.accept_with(&cfg.name).ok();
+                        }
+                        ConfigKey::Tags => {
+                            xfer.accept_with(&cfg.tags).ok();
+                        }
+                        ConfigKey::Json => {
+                            xfer.accept_with(&cfg.json).ok();
+                        }
+                        ConfigKey::UsbConsole => {
+                            xfer.accept_with(&cfg.usb_console).ok();
+                        }
+                        ConfigKey::PowerOn => {
+                            xfer.accept_with(&cfg.power_on).ok();
+                        }
+                        ConfigKey::PowerOff => {
+                            xfer.accept_with(&cfg.power_off).ok();
+                        }
+                        ConfigKey::PowerRescue => {
+                            xfer.accept_with(&cfg.power_rescue).ok();
+                        }
+                    }
+                } else {
+                    xfer.reject().unwrap();
+                }
+            }
             _ => {
                 xfer.reject().unwrap();
             }
@@ -188,7 +218,7 @@ impl<B: UsbBus> UsbClass<B> for ControlClass {
             }
             // TODO: read power meter
             // TODO: read version
-            Ok(ControlRequest::SetConfig) => {
+            Ok(ControlRequest::Config) => {
                 if let Ok(key) = req.value.try_into() {
                     let cfg = self.config.get();
                     match key {

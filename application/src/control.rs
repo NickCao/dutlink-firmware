@@ -19,6 +19,7 @@ pub enum ControlRequest {
     Nop,
     Power,
     Storage,
+    SetConfig,
 }
 
 #[repr(u16)]
@@ -41,34 +42,47 @@ pub enum StorageAction {
     DUT,
 }
 
+#[repr(u16)]
+#[derive(TryFromPrimitive)]
+pub enum ConfigKey {
+    Name,
+    Tags,
+    Json,
+    UsbConsole,
+    PowerOn,
+    PowerOff,
+    PowerRescue,
+}
+
 pub struct ControlClass {
     iface: InterfaceNumber,
+    config: ConfigArea,
     power: Option<PowerAction>,
     storage: Option<StorageAction>,
 }
 
 impl ControlClass {
-    pub fn new<B: UsbBus>(alloc: &UsbBusAllocator<B>) -> Self {
+    pub fn new<B: UsbBus>(alloc: &UsbBusAllocator<B>, config: ConfigArea) -> Self {
         Self {
             iface: alloc.interface(),
             power: None,
             storage: None,
+            config,
         }
     }
     pub fn handle<C: CTLPinsTrait, S: StorageSwitchTrait>(
         &mut self,
         ctlpins: &mut C,
         storage: &mut S,
-        config: &ConfigArea,
     ) {
         if let Some(action) = self.power.take() {
             match action {
                 PowerAction::Nop => (),
                 PowerAction::Off => {
-                    ctlpins.power_off(&config.get().power_off);
+                    ctlpins.power_off(&self.config.get().power_off);
                 }
                 PowerAction::On => {
-                    ctlpins.power_on(&config.get().power_on);
+                    ctlpins.power_on(&self.config.get().power_on);
                 }
                 PowerAction::ForceOff => {
                     ctlpins.power_off(&[]);
@@ -77,7 +91,7 @@ impl ControlClass {
                     ctlpins.power_on(&[]);
                 }
                 PowerAction::Rescue => {
-                    ctlpins.power_on(&config.get().power_rescue);
+                    ctlpins.power_on(&self.config.get().power_rescue);
                 }
             }
         }
@@ -174,6 +188,44 @@ impl<B: UsbBus> UsbClass<B> for ControlClass {
             }
             // TODO: read power meter
             // TODO: read version
+            Ok(ControlRequest::SetConfig) => {
+                if let Ok(key) = req.value.try_into() {
+                    let cfg = self.config.get();
+                    match key {
+                        ConfigKey::Name => {
+                            let cfg = cfg.set_name(xfer.data());
+                            self.config.write_config(&cfg).ok();
+                        }
+                        ConfigKey::Tags => {
+                            let cfg = cfg.set_tags(xfer.data());
+                            self.config.write_config(&cfg).ok();
+                        }
+                        ConfigKey::Json => {
+                            let cfg = cfg.set_json(xfer.data());
+                            self.config.write_config(&cfg).ok();
+                        }
+                        ConfigKey::UsbConsole => {
+                            let cfg = cfg.set_usb_console(xfer.data());
+                            self.config.write_config(&cfg).ok();
+                        }
+                        ConfigKey::PowerOn => {
+                            let cfg = cfg.set_power_on(xfer.data());
+                            self.config.write_config(&cfg).ok();
+                        }
+                        ConfigKey::PowerOff => {
+                            let cfg = cfg.set_power_off(xfer.data());
+                            self.config.write_config(&cfg).ok();
+                        }
+                        ConfigKey::PowerRescue => {
+                            let cfg = cfg.set_power_rescue(xfer.data());
+                            self.config.write_config(&cfg).ok();
+                        }
+                    }
+                    xfer.accept().unwrap();
+                } else {
+                    xfer.reject().unwrap();
+                }
+            }
             _ => {
                 xfer.reject().unwrap();
             }

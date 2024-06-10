@@ -76,8 +76,6 @@ mod app {
         ctl_pins: CTLPinsType,
 
         power_meter: MAVPowerMeter,
-
-        config: ConfigArea,
     }
 
     // Local resources to specific tasks (cannot be shared)
@@ -195,12 +193,14 @@ mod app {
         unsafe {
             USB_BUS = Some(UsbBus::new(usb_periph, &mut EP_MEMORY));
         }
+
+        let config = ConfigArea::new(stm32f4xx_hal::flash::LockedFlash::new(dp.FLASH));
         /* I tried creating a 2nd serial port which only works on STM32F412 , 411 has not enough
            endpoints, but it didn't work well, the library probably needs some debugging */
         let mut serial1 = new_usb_serial! (unsafe { USB_BUS.as_ref().unwrap() });
         let mut serial2 = new_usb_serial! (unsafe { USB_BUS.as_ref().unwrap() });
         let dfu = new_dfu_bootloader(unsafe { USB_BUS.as_ref().unwrap() });
-        let ctl = ControlClass::new(unsafe { USB_BUS.as_ref().unwrap() });
+        let ctl = ControlClass::new(unsafe { USB_BUS.as_ref().unwrap() }, config);
 
         serial1.reset();
         serial2.reset();
@@ -226,7 +226,6 @@ mod app {
 
         let (to_dut_serial, to_dut_serial_consumer) = ctx.local.q_to_dut.split();
 
-        let config = ConfigArea::new(stm32f4xx_hal::flash::LockedFlash::new(dp.FLASH));
 
         (
             Shared {
@@ -243,7 +242,6 @@ mod app {
                 adc_dma_transfer,
                 ctl_pins,
                 power_meter,
-                config,
             },
             Local {
                 _button,
@@ -278,7 +276,7 @@ mod app {
         });
     }
 
-    #[task(binds = OTG_FS, shared = [usb_dev, shell, ctl, serial2, dfu, led_cmd, storage, ctl_pins, power_meter, config], local=[to_dut_serial])]
+    #[task(binds = OTG_FS, shared = [usb_dev, shell, ctl, serial2, dfu, led_cmd, storage, ctl_pins, power_meter], local=[to_dut_serial])]
     fn usb_task(mut cx: usb_task::Context) {
         let usb_dev         = &mut cx.shared.usb_dev;
         let shell           = &mut cx.shared.shell;
@@ -291,17 +289,16 @@ mod app {
 
         let ctl_pins        = &mut cx.shared.ctl_pins;
         let power_meter     = &mut cx.shared.power_meter;
-        let config          = &mut cx.shared.config;
 
-        (usb_dev, ctl, dfu, shell, serial2, led_cmd, storage, ctl_pins, power_meter, config).lock(
-            |usb_dev, ctl, dfu, shell, serial2, led_cmd, storage, ctl_pins, power_meter, config| {
+        (usb_dev, ctl, dfu, shell, serial2, led_cmd, storage, ctl_pins, power_meter).lock(
+            |usb_dev, ctl, dfu, shell, serial2, led_cmd, storage, ctl_pins, power_meter| {
             let serial1 = shell.get_serial_mut();
 
             if !usb_dev.poll(&mut [serial1, serial2, ctl, dfu]) {
                 return;
             }
 
-            ctl.handle(ctl_pins, storage, config);
+            ctl.handle(ctl_pins, storage);
 
             let available_to_dut = to_dut_serial.capacity()-to_dut_serial.len();
 
@@ -312,7 +309,7 @@ mod app {
                 return
             };
 
-            shell::handle_shell_commands(shell, led_cmd, storage, ctl_pins, power_meter, config);
+            shell::handle_shell_commands(shell, led_cmd, storage, ctl_pins, power_meter);
 
             let mut buf = [0u8; DUT_BUF_SIZE];
             match serial2.read(&mut buf[..available_to_dut]) {

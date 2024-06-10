@@ -89,8 +89,6 @@ mod app {
         usart_tx: Tx<pac::USART1>,
         to_dut_serial: Producer<'static, u8, DUT_BUF_SIZE>,          // queue of characters to send to the DUT
         to_dut_serial_consumer: Consumer<'static, u8, DUT_BUF_SIZE>, // consumer side of the queue
-        to_host_serial: Producer<'static, u8, DUT_BUF_SIZE>,          // queue of characters to send to the DUT
-        to_host_serial_consumer: Consumer<'static, u8, DUT_BUF_SIZE>, // consumer side of the queue
         adc_buffer: Option<&'static mut [u16; 2]>,
     }
 
@@ -232,7 +230,6 @@ mod app {
              console_mode: false,};
 
         let (to_dut_serial, to_dut_serial_consumer) = ctx.local.q_to_dut.split();
-        let (to_host_serial, to_host_serial_consumer) = ctx.local.q_from_dut.split();
 
         let config = ConfigArea::new(stm32f4xx_hal::flash::LockedFlash::new(dp.FLASH));
 
@@ -260,8 +257,6 @@ mod app {
                 usart_rx,
                 to_dut_serial,
                 to_dut_serial_consumer,
-                to_host_serial,
-                to_host_serial_consumer,
                 adc_buffer,
             },
             // Move the monotonic timer to the RTIC run-time, this enables
@@ -270,59 +265,23 @@ mod app {
         )
     }
 
-    #[task(binds = USART1, priority=1, local = [usart_rx, to_host_serial], shared = [led_rx])]
+    #[task(binds = USART1, priority=1, local = [usart_rx], shared = [led_rx, serial2])]
     fn usart_task(cx: usart_task::Context){
         let usart_rx = cx.local.usart_rx;
-        let led_rx = cx.shared.led_rx;
-        let to_host_serial = cx.local.to_host_serial;
+        let led_rx   = cx.shared.led_rx;
+        let serial2  = cx.shared.serial2;
 
-        (led_rx,).lock(|led_rx| {
+        (led_rx, serial2).lock(|led_rx, serial2| {
             while usart_rx.is_rx_not_empty() {
                 led_rx.set_low();
-                match usart_rx.read() {
-                    Ok(b) => {
-                        to_host_serial.enqueue(b).ok(); // this could over-run but it's ok the only solution would be a bigger buffer
-                    },
-                    Err(_e) => {
-                        break;
-                    }
+                if let Ok(b) = usart_rx.read() {
+                    let _ = serial2.write(&[b]); // FIXME: check WouldBlock and other error
+                } else {
+                    break;
                 }
             }
             usart_rx.clear_idle_interrupt();
         });
-
-
-        if to_host_serial.len() > 0 {
-           console_monitor_task::spawn().ok();
-        }
-    }
-
-    #[task(local=[to_host_serial_consumer], shared=[serial2])]
-    fn console_monitor_task(mut cx: console_monitor_task::Context) {
-        let to_host_serial_consumer = cx.local.to_host_serial_consumer;
-        let serial2 = &mut cx.shared.serial2;
-
-        // if the DUT has sent data over the uart, we send it to the host now
-        if to_host_serial_consumer.len() > 0 {
-            (serial2,).lock(|serial2| {
-                let mut buf = [0u8; DUT_BUF_SIZE+32];
-                let mut count = 0;
-                loop {
-                    if let Some(c) = to_host_serial_consumer.dequeue() {
-                        buf[count] = c;
-                        count += 1;
-                        if count >= buf.len() {
-                            break;
-                        }
-                    } else {
-                        break;
-                    }
-                }
-                if count>0 {
-                    serial2.write(&buf[..count]).ok();
-                }
-            });
-        }
     }
 
     #[task(binds = OTG_FS, shared = [usb_dev, shell, shell_status, ctl, serial2, dfu, led_cmd, storage, ctl_pins, power_meter, config], local=[to_dut_serial])]

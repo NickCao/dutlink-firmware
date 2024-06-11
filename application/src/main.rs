@@ -363,13 +363,11 @@ mod app {
             |usb_dev, dfu, ctl, shell, shell_status, led_cmd, storage, ctl_pins, power_meter, config| {
             let serial1 = shell.get_serial_mut();
 
-            ctl.pre_poll(config, power_meter);
-
             if !usb_dev.poll(&mut [serial1, dfu, ctl]) {
                 return;
             }
 
-            ctl.post_poll(config, ctl_pins, storage);
+            ctl.post_poll(config, ctl_pins, storage, power_meter);
 
             let available_to_dut = to_dut_serial.capacity()-to_dut_serial.len();
 

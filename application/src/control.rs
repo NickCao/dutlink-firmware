@@ -20,7 +20,7 @@ const MAX_READ_LENGTH: usize = 128;
 #[repr(u8)]
 #[derive(TryFromPrimitive)]
 pub enum ControlRequest {
-    Ping,
+    Refresh,
     Power,
     Storage,
     Config,
@@ -90,6 +90,7 @@ pub struct ControlClass {
     power: Option<PowerAction>,
     storage: Option<StorageAction>,
     pin: Option<(SetPin, SetPinState)>,
+    refresh: Option<()>,
     data: Data,
 }
 
@@ -108,6 +109,7 @@ impl ControlClass {
             storage: None,
             pin: None,
             config: None,
+            refresh: None,
             data: Data {
                 power: 0.0,
                 voltage: 0.0,
@@ -116,17 +118,12 @@ impl ControlClass {
             },
         }
     }
-    pub fn pre_poll(&mut self, config: &ConfigArea, power_meter: &mut dyn PowerMeter) {
-        self.data.power = power_meter.get_power();
-        self.data.voltage = power_meter.get_voltage();
-        self.data.current = power_meter.get_current();
-        self.data.config = config.get();
-    }
     pub fn post_poll<C: CTLPinsTrait, S: StorageSwitchTrait>(
         &mut self,
         config: &mut ConfigArea,
         ctlpins: &mut C,
         storage: &mut S,
+        power_meter: &mut dyn PowerMeter,
     ) {
         if let Some((key, value)) = self.config.take() {
             match key {
@@ -211,6 +208,12 @@ impl ControlClass {
                     ctlpins.set_ctl_d(state);
                 }
             }
+        }
+        if let Some(()) = self.refresh.take() {
+            self.data.power = power_meter.get_power();
+            self.data.voltage = power_meter.get_voltage();
+            self.data.current = power_meter.get_current();
+            self.data.config = config.get();
         }
     }
 }
@@ -329,7 +332,8 @@ impl<B: UsbBus> UsbClass<B> for ControlClass {
         }
 
         match req.request.try_into() {
-            Ok(ControlRequest::Ping) => {
+            Ok(ControlRequest::Refresh) => {
+                self.refresh = Some(());
                 xfer.accept().unwrap();
             }
             Ok(ControlRequest::Power) => {
